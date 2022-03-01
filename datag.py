@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from mpl_toolkits import mplot3d 
 from matplotlib import pyplot as plt
-import LMA
+from libs import LMA
 
 def create_world_rotation_matrix(x, y, z):
     R_x = np.array([[1, 0, 0],
