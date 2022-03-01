@@ -1,6 +1,7 @@
 import apriltag as at
 import cv2
 import numpy as np
+import os
 from mpl_toolkits import mplot3d 
 from matplotlib import pyplot as plt
 from libs import LMA
@@ -72,9 +73,10 @@ for i in range(total_tags):
 K = np.array([])
 dist = None
 
-for n in range(15):
+Root_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
 
-    imgpath = f'/home/pool/Documents/detection/TagVision/images/img{n+1}.png'
+for n in range(15):
+    imgpath = Root_dir + f'/TagVision/images/img{n+1}.png'
     img = cv2.imread(imgpath, cv2.IMREAD_GRAYSCALE)
 
     img_size = (img.shape[1], img.shape[0])
