@@ -1,10 +1,9 @@
-import math
 import apriltag as at
 import cv2
 import numpy as np
 from mpl_toolkits import mplot3d 
 from matplotlib import pyplot as plt
-from scipy.optimize import least_squares
+import LMA
 
 def create_world_rotation_matrix(x, y, z):
     R_x = np.array([[1, 0, 0],
@@ -20,18 +19,28 @@ def create_world_rotation_matrix(x, y, z):
     R = np.matmul(R_z, np.matmul(R_y, R_x))
     return R.T
 
-def model_func(extr, Rt, tt, og):
-    R = np.array([[extr[0], extr[1], extr[2]],
-                  [extr[3], extr[4], extr[5]],
-                  [extr[6], extr[7], extr[8]]]).astype(np.float32)
-    t = np.array([[extr[9], extr[10], extr[11]]]).T.astype(np.float32)
-
+def model_func(extr, args):
+    """ Model function
+    Note: This function is used as an optimization/error function in
+    Levenberg-Marquardt algorithm.
+    :param extr: values to be optimized
+    :param args: values used in optimization
+    :return: Distances calculated using the given parameters
+    """
+    rv = np.array([extr[0], extr[1], extr[2]]).astype(np.float32)
+    # Rotation matrix
+    R, _ = cv2.Rodrigues(rv)
+    R_inv = np.linalg.inv(R)
+    # Translation vector
+    t = np.array([[extr[3], extr[4], extr[5]]]).T.astype(np.float32)
+    
+    Rt, tt, og = args
     residuals = []
     for i in range(len(Rt)):
-        d = np.linalg.norm(np.matmul(Rt[i], og[i]) + tt[i] + np.matmul(R.T, t))
+        d = np.linalg.norm(np.matmul(Rt[i], og[i]) + tt[i] + np.matmul(R_inv, t))
         residuals.append(d)
     
-    return residuals
+    return np.array(residuals)
 
 tag_size = 0.158
 # World position(xyz) of the tags
@@ -47,7 +56,6 @@ tag_w_ori = [[0, 0, 0],
              [0, 0, 0]]
 
 fig = plt.figure()
-ax = plt.axes(projection="3d")
 
 tag_Rs = []
 total_tags = len(tag_w_ori)
@@ -58,7 +66,7 @@ for i in range(total_tags):
 
     # Plot tag locations
     tag_pos = tag_ts[i]
-    ax.scatter3D(tag_pos[0], tag_pos[1], tag_pos[2])
+    #ax.scatter3D(tag_pos[0], tag_pos[1], tag_pos[2])
 
 # Camera params
 K = np.array([])
@@ -66,7 +74,7 @@ dist = None
 
 for n in range(15):
 
-    imgpath = f'/home/pool/Documents/detection/apriltag/images/img{n+1}.png'
+    imgpath = f'/home/pool/Documents/detection/TagVision/images/img{n+1}.png'
     img = cv2.imread(imgpath, cv2.IMREAD_GRAYSCALE)
 
     img_size = (img.shape[1], img.shape[0])
@@ -106,72 +114,74 @@ for n in range(15):
 
     for i in range(tag_count):
         ret, rvec, tvec, _ = cv2.solvePnPRansac(opts[i][0], ipts[i][0], K, dist)
-
         id = ids[i]
+        # Tag-to-world rotation
         Rw = tag_Rs[id]
+        # Tag origin coords in world coordinate system
         tw = tag_ts[id]
 
+        # Rotation and translation of the tag
         Rt, _ = cv2.Rodrigues(np.float32(rvec))
         t = tvec
+        # Rotation and translation of the camera in tag coord system
         Rc = Rt.T
         tc = -t
-
+        
         # Rotation to align with world coord system
         R = np.matmul(Rw, Rc)
-        # xyz position in tag coord system
+        # Camera position in tag coord system
         pos_t = np.matmul(R, tc)
-        # Position in world coord system
+        # Camera position in world coord system
         p = pos_t + tw
-        #ax.scatter3D(p[0], p[1], p[2])
 
-        # Translation
-        tcw = np.matmul(-R, p)
-        # Object pose?
-        o_pos = np.matmul(R.T, tcw)
-        #ax.scatter3D(o_pos[0], o_pos[1], o_pos[2])
+        # Global origin in camera coordinate system with tag params
+        og = -np.matmul(Rw, tw)
+        orig = np.matmul(Rt, og) + t
 
-        # Camera coord system?
-        #ax.scatter3D(0, 0, 0)
-        tposc = np.matmul(R.T, -tw) + tcw
-        #ax.scatter3D(tposc[0], tposc[1], tposc[2])
-        
-        tag_og.append(np.matmul(Rw, tw))
+        # Global origin in camera coord system with cam params
+        origC = np.matmul(R.T, -p)
+
+        tag_og.append(og)
         tag_Rts.append(Rt)
         tag_tts.append(t)
+
         cam_R += R
-        cam_t += tcw
+        cam_t += p
+        '''
+        # Drawing tag centers to the image
+        rvec, _ = cv2.Rodrigues(R.T)
+        io, _ = cv2.projectPoints(pos_t-tw, rvec, -origC, K, dist)
 
-    # Camera pose avg
+        io = io[0][0]
+        iox = int(io[0])
+        ioy = int(io[1])
+        img = cv2.circle(img, (iox, ioy), radius=10, color=(0, 0, 255), thickness=-1)
+        '''
+        
     Rcm = cam_R/tag_count
+    Rcm, _ = cv2.Rodrigues(Rcm)
     tcm = cam_t/tag_count
-    avg_pos = np.matmul(Rcm.T, -tcm)
-    ax.scatter3D(avg_pos[0], avg_pos[1], avg_pos[2])
-
     # Initial camera extrinsic
-    init_extrinsic = np.concatenate((Rcm, tcm.T), axis=0).reshape(12)
-    
-    #init_extrinsic = [-0.5, 0.6, -0.6, 0.8, 0.5, -0.3, 0.1, -0.6, -0.8, 0.6, -0.9, 0.8]
-    # Optimize camera extrinsic
-    extrinsic = least_squares(model_func, init_extrinsic,
-                              args=(tag_Rts, tag_tts, tag_og))
-                              
-    extr = extrinsic['x']
-    R = np.array([[extr[0], extr[1], extr[2]],
-                  [extr[3], extr[4], extr[5]],
-                  [extr[6], extr[7], extr[8]]]).astype(np.float32)
-    t = np.array([[extr[9], extr[10], extr[11]]]).T.astype(np.float32)
-    
+    init_extrinsic = np.concatenate((Rcm.T, tcm.T), axis=0).reshape(-1)
 
-    '''
-    print(R)
-    print(cam_R/tag_count)
-    print()
-    print(t)
-    print(cam_t/tag_count)
-    '''
+    args = (tag_Rts, tag_tts, tag_og)
+    # Optimize camera extrinsic with Levenberg-Marquardt method
+    err, extr, _ = LMA.LM(init_extrinsic, args, model_func, kmax=100)
     
-    p = np.matmul(R.T, -t)
-    #ax.scatter3D(p[0], p[1], p[2])
-    #break
+    rvo = np.array([extr[0], extr[1], extr[2]]).astype(np.float32)
+    Ro, _ = cv2.Rodrigues(rvo)
+    to = np.array([[extr[3], extr[4], extr[5]]]).T.astype(np.float32)
     
-plt.show()
+    # World origin in camera coord system
+    po = np.matmul(Ro.T, -to)
+    
+    rvec, _ = cv2.Rodrigues(Ro.T)
+    # Draw world origin to the image with optimized params
+    io, _ = cv2.projectPoints(to, rvec, -po, K, dist)
+    io = io[0][0]
+    iox = int(io[0])
+    ioy = int(io[1])
+    image = cv2.circle(img, (iox, ioy), radius=10, color=(0, 0, 255), thickness=-1)
+    plt.imshow(image)
+
+    plt.show()
