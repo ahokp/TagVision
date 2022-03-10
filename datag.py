@@ -56,6 +56,35 @@ tag_w_ori = [[0, 0, 0],
              [0, 0, 0],
              [0, 0, 0]]
 
+# World position of the object
+obj_t = np.array([[0.345], [0.2335], [0]])
+
+# Orientation of the object
+RWO = create_world_rotation_matrix(np.pi, 0, 0)
+
+# Corner points of the object
+opoints = np.array([[-0.16, -0.06, 0],
+                    [0.16, -0.06, 0],
+                    [0.16, 0.06, 0],
+                    [-0.16, 0.06, 0],
+                    [-0.16, -0.06, 0.11],
+                    [0.16, -0.06, 0.11],
+                    [0.16, 0.06, 0.11],
+                    [-0.16, 0.06, 0.11]]).astype(np.float32) + obj_t.T
+
+edges = np.array([0, 1,
+                  1, 2,
+                  2, 3,
+                  3, 0,
+                  0, 4,
+                  1, 5,
+                  2, 6,
+                  3, 7,
+                  4, 5,
+                  5, 6,
+                  6, 7,
+                  7, 4]).reshape(-1, 2)
+
 fig = plt.figure()
 
 tag_Rs = []
@@ -73,27 +102,27 @@ for i in range(total_tags):
 K = np.array([])
 dist = None
 
+# Tag model points
+obj_points = np.array([-1, -1, 0,
+                        1, -1, 0,
+                        1, 1, 0,
+                        -1, 1, 0]).astype(np.float32).reshape(1, -1, 3)*tag_size/2
+
 Root_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
 
 for n in range(15):
     imgpath = Root_dir + f'/TagVision/images/img{n+1}.png'
-    img = cv2.imread(imgpath, cv2.IMREAD_GRAYSCALE)
-
+    img = cv2.imread(imgpath)
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     img_size = (img.shape[1], img.shape[0])
 
     detector = at.apriltag('tag36h11')
-    detections = detector.detect(img)
+    detections = detector.detect(img_gray)
     tag_count = len(detections)
 
     ipts = []
     opts = []
     ids = []
-
-    obj_points = np.array([
-                        -1, -1, 0,
-                        1, -1, 0,
-                        1, 1, 0,
-                        -1, 1, 0]).astype(np.float32).reshape(1, -1, 3)*tag_size/2
 
     for i in range(tag_count):
         tag = detections[i]
@@ -149,16 +178,6 @@ for n in range(15):
 
         cam_R += R
         cam_t += p
-        '''
-        # Drawing tag centers to the image
-        rvec, _ = cv2.Rodrigues(R.T)
-        io, _ = cv2.projectPoints(pos_t-tw, rvec, -origC, K, dist)
-
-        io = io[0][0]
-        iox = int(io[0])
-        ioy = int(io[1])
-        img = cv2.circle(img, (iox, ioy), radius=10, color=(0, 0, 255), thickness=-1)
-        '''
         
     Rcm = cam_R/tag_count
     Rcm, _ = cv2.Rodrigues(Rcm)
@@ -183,7 +202,36 @@ for n in range(15):
     io = io[0][0]
     iox = int(io[0])
     ioy = int(io[1])
-    image = cv2.circle(img, (iox, ioy), radius=10, color=(0, 0, 255), thickness=-1)
-    plt.imshow(image)
+    cv2.circle(img, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
 
+    # Object image coords
+    oic, _ = cv2.projectPoints(obj_t, rvec, po, K, dist)
+    oic = oic[0][0]
+    oicx = int(oic[0])
+    oicy = int(oic[1])
+    cv2.circle(img, (oicx, oicy), radius=10, color=(255, 0, 0), thickness=-1)
+    
+    # Drawing bounding box around the object
+    ipoints, _ = cv2.projectPoints(opoints, rvec, po, K, dist)
+    ipoints = ipoints.astype(int).reshape(-1, 2)
+    for i, j in edges:
+        start = ipoints[i]
+        end = ipoints[j]
+        cv2.line(img, (start[0], start[1]), (end[0], end[1]),
+                 (0, 255, 0), 1, 16)
+    
+    plt.imshow(img)
     plt.show()
+
+    hvec = np.array([0, 0, 0, 1])
+    # Camera extrinsics in global
+    EGC = np.vstack((np.hstack((Ro, po)), hvec))
+    # Object extrinsics in global
+    EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
+
+    # Object pose in camera coordinate system
+    ECO = np.matmul(EGC, EGO)
+    RCO = ECO[:3, :3]
+    TCO = ECO[:3, 3]
+
+    break
