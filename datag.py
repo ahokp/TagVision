@@ -1,3 +1,4 @@
+from re import T
 import apriltag as at
 import cv2
 import numpy as np
@@ -60,7 +61,7 @@ tag_w_ori = [[0, 0, 0],
 obj_t = np.array([[0.345], [0.2335], [0]])
 
 # Orientation of the object
-RWO = create_world_rotation_matrix(np.pi, 0, 0)
+RWO = create_world_rotation_matrix(0, 0, 0)
 
 # Corner points of the object
 opoints = np.array([[-0.16, -0.06, 0],
@@ -70,7 +71,7 @@ opoints = np.array([[-0.16, -0.06, 0],
                     [-0.16, -0.06, 0.11],
                     [0.16, -0.06, 0.11],
                     [0.16, 0.06, 0.11],
-                    [-0.16, 0.06, 0.11]]).astype(np.float32) + obj_t.T
+                    [-0.16, 0.06, 0.11]]).astype(np.float32)
 
 edges = np.array([0, 1,
                   1, 2,
@@ -179,6 +180,16 @@ for n in range(15):
         cam_R += R
         cam_t += p
         
+        # Draw tag centers
+        '''
+        io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, tvec, K, dist)
+        io = io[0][0]
+        iox = int(io[0])
+        ioy = int(io[1])
+        cv2.circle(img, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
+          
+        '''
+
     Rcm = cam_R/tag_count
     Rcm, _ = cv2.Rodrigues(Rcm)
     tcm = cam_t/tag_count
@@ -198,21 +209,49 @@ for n in range(15):
     
     rvec, _ = cv2.Rodrigues(Ro.T)
     # Draw world origin to the image with optimized params
-    io, _ = cv2.projectPoints(to, rvec, -po, K, dist)
+    #io, _ = cv2.projectPoints(to, rvec, -po, K, dist)
+    io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, po, K, dist)
     io = io[0][0]
     iox = int(io[0])
     ioy = int(io[1])
     cv2.circle(img, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
 
-    # Object image coords
-    oic, _ = cv2.projectPoints(obj_t, rvec, po, K, dist)
+
+    hvec = np.array([0, 0, 0, 1])
+    # Camera extrinsics in global
+    EGC = np.vstack((np.hstack((Ro.T, po)), hvec))
+    # Object extrinsics in global
+    EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
+
+    # Object pose in camera coordinate system
+    ECO = np.matmul(EGC, EGO)
+    RCO = ECO[:3, :3].astype(np.float32)
+    TCO = ECO[:3, 3].astype(np.float32)
+    rco_vec, _ = cv2.Rodrigues(RCO)
+    
+    # Draw object in image
+    oic, _ = cv2.projectPoints(np.zeros((3, 1)), rco_vec, TCO, K, dist)
     oic = oic[0][0]
     oicx = int(oic[0])
     oicy = int(oic[1])
-    cv2.circle(img, (oicx, oicy), radius=10, color=(255, 0, 0), thickness=-1)
+    cv2.circle(img, (oicx, oicy), radius=10, color=(0, 255, 0), thickness=-1)
     
+    # Draw object xyz-axes 
+    diag = np.diag(np.ones(3))*0.15
+    ax_pts, _ = cv2.projectPoints(diag, rco_vec, TCO, K, dist)
+    ax_pts = ax_pts.astype(int)
+    x_pt = ax_pts[0][0]
+    y_pt = ax_pts[1][0]
+    z_pt = ax_pts[2][0]
+    cv2.line(img, (oicx, oicy), (x_pt[0], x_pt[1]),
+             (255, 0, 0), 4, 16)
+    cv2.line(img, (oicx, oicy), (y_pt[0], y_pt[1]),
+             (0, 255, 0), 4, 16)
+    cv2.line(img, (oicx, oicy), (z_pt[0], z_pt[1]),
+             (0, 0, 255), 4, 16)
+
     # Drawing bounding box around the object
-    ipoints, _ = cv2.projectPoints(opoints, rvec, po, K, dist)
+    ipoints, _ = cv2.projectPoints(opoints, rco_vec, TCO, K, dist)
     ipoints = ipoints.astype(int).reshape(-1, 2)
     for i, j in edges:
         start = ipoints[i]
@@ -222,16 +261,4 @@ for n in range(15):
     
     plt.imshow(img)
     plt.show()
-
-    hvec = np.array([0, 0, 0, 1])
-    # Camera extrinsics in global
-    EGC = np.vstack((np.hstack((Ro, po)), hvec))
-    # Object extrinsics in global
-    EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
-
-    # Object pose in camera coordinate system
-    ECO = np.matmul(EGC, EGO)
-    RCO = ECO[:3, :3]
-    TCO = ECO[:3, 3]
-
     break
