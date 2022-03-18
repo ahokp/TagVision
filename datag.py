@@ -250,5 +250,9 @@ for n in range(15):
     
     plt.imshow(img)
     plt.show()
-    break
 
+    '''
+    # Save output images
+    out_img_path = Root_dir + f'/TagVision/output/img{n+1}.png'
+    cv2.imwrite(out_img_path, img)
+    '''
