@@ -1,4 +1,3 @@
-from re import T
 import apriltag as at
 import cv2
 import numpy as np
@@ -61,17 +60,17 @@ tag_w_ori = [[0, 0, 0],
 obj_t = np.array([[0.345], [0.2335], [0]])
 
 # Orientation of the object
-RWO = create_world_rotation_matrix(0, 0, 0)
+RWO = create_world_rotation_matrix(0, 0, np.pi/2)
 
 # Corner points of the object
-opoints = np.array([[-0.16, -0.06, 0],
-                    [0.16, -0.06, 0],
-                    [0.16, 0.06, 0],
-                    [-0.16, 0.06, 0],
-                    [-0.16, -0.06, 0.11],
-                    [0.16, -0.06, 0.11],
-                    [0.16, 0.06, 0.11],
-                    [-0.16, 0.06, 0.11]]).astype(np.float32)
+opoints = np.array([[0.06, -0.16, 0],
+                    [0.06, 0.16, 0],
+                    [-0.06, 0.16, 0],
+                    [-0.06, -0.16, 0],
+                    [0.06, -0.16, 0.11],
+                    [0.06, 0.16, 0.11],
+                    [-0.06, 0.16, 0.11],
+                    [-0.06, -0.16, 0.11]]).astype(np.float32)
 
 edges = np.array([0, 1,
                   1, 2,
@@ -179,16 +178,6 @@ for n in range(15):
 
         cam_R += R
         cam_t += p
-        
-        # Draw tag centers
-        '''
-        io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, tvec, K, dist)
-        io = io[0][0]
-        iox = int(io[0])
-        ioy = int(io[1])
-        cv2.circle(img, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
-          
-        '''
 
     Rcm = cam_R/tag_count
     Rcm, _ = cv2.Rodrigues(Rcm)
@@ -237,7 +226,7 @@ for n in range(15):
     cv2.circle(img, (oicx, oicy), radius=10, color=(0, 255, 0), thickness=-1)
     
     # Draw object xyz-axes 
-    diag = np.diag(np.ones(3))*0.15
+    diag = np.eye(3)*0.15
     ax_pts, _ = cv2.projectPoints(diag, rco_vec, TCO, K, dist)
     ax_pts = ax_pts.astype(int)
     x_pt = ax_pts[0][0]
@@ -262,3 +251,4 @@ for n in range(15):
     plt.imshow(img)
     plt.show()
     break
+
