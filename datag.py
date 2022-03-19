@@ -2,7 +2,6 @@ import apriltag as at
 import cv2
 import numpy as np
 import os
-from mpl_toolkits import mplot3d 
 from matplotlib import pyplot as plt
 from libs import LMA
 
@@ -43,6 +42,40 @@ def model_func(extr, args):
     
     return np.array(residuals)
 
+def draw_pose(rvec, tvec, K, dist, img):
+    # Draw object center in image
+    oic, _ = cv2.projectPoints(np.zeros((3, 1)), rvec, tvec, K, dist)
+    oic = oic[0][0]
+    oicx = int(oic[0])
+    oicy = int(oic[1])
+    cv2.circle(img, (oicx, oicy), radius=10, color=(0, 255, 0), thickness=-1)
+        
+    # Draw object xyz-axes 
+    diag = np.eye(3)*0.1
+    ax_pts, _ = cv2.projectPoints(diag, rvec, tvec, K, dist)
+    ax_pts = ax_pts.astype(int)
+    x_pt = ax_pts[0][0]
+    y_pt = ax_pts[1][0]
+    z_pt = ax_pts[2][0]
+    cv2.line(img, (oicx, oicy), (x_pt[0], x_pt[1]),
+            (255, 0, 0), 4, 16)
+    cv2.line(img, (oicx, oicy), (y_pt[0], y_pt[1]),
+            (0, 255, 0), 4, 16)
+    cv2.line(img, (oicx, oicy), (z_pt[0], z_pt[1]),
+            (0, 0, 255), 4, 16)
+
+# World position of the objects
+obj_ts = [np.array([[0.345], [0.2335], [0]])]
+# Orientation of the objects with respect to the world coord system
+obj_w_oris = [[0, 0, np.pi/2]]
+# Create object-to-world rotations
+obj_Rs = []
+obj_count = len(obj_ts)
+for i in range(obj_count):
+    rot = obj_w_oris[i]
+    obj_Rs.append(create_world_rotation_matrix(rot[0], rot[1], rot[2]))
+
+
 tag_size = 0.158
 # World position(xyz) of the tags
 tag_ts = [np.array([[0.611], [0.079], [0]]),
@@ -56,47 +89,12 @@ tag_w_ori = [[0, 0, 0],
              [0, 0, 0],
              [0, 0, 0]]
 
-# World position of the object
-obj_t = np.array([[0.345], [0.2335], [0]])
-
-# Orientation of the object
-RWO = create_world_rotation_matrix(0, 0, np.pi/2)
-
-# Corner points of the object
-opoints = np.array([[0.06, -0.16, 0],
-                    [0.06, 0.16, 0],
-                    [-0.06, 0.16, 0],
-                    [-0.06, -0.16, 0],
-                    [0.06, -0.16, 0.11],
-                    [0.06, 0.16, 0.11],
-                    [-0.06, 0.16, 0.11],
-                    [-0.06, -0.16, 0.11]]).astype(np.float32)
-
-edges = np.array([0, 1,
-                  1, 2,
-                  2, 3,
-                  3, 0,
-                  0, 4,
-                  1, 5,
-                  2, 6,
-                  3, 7,
-                  4, 5,
-                  5, 6,
-                  6, 7,
-                  7, 4]).reshape(-1, 2)
-
-fig = plt.figure()
-
 tag_Rs = []
 total_tags = len(tag_w_ori)
 for i in range(total_tags):
     # Create tag-to-world rotations
     rot = tag_w_ori[i]
     tag_Rs.append(create_world_rotation_matrix(rot[0], rot[1], rot[2]))
-
-    # Plot tag locations
-    tag_pos = tag_ts[i]
-    #ax.scatter3D(tag_pos[0], tag_pos[1], tag_pos[2])
 
 # Camera params
 K = np.array([])
@@ -167,10 +165,6 @@ for n in range(15):
 
         # Global origin in camera coordinate system with tag params
         og = -np.matmul(Rw, tw)
-        orig = np.matmul(Rt, og) + t
-
-        # Global origin in camera coord system with cam params
-        origC = np.matmul(R.T, -p)
 
         tag_og.append(og)
         tag_Rts.append(Rt)
@@ -198,7 +192,6 @@ for n in range(15):
     
     rvec, _ = cv2.Rodrigues(Ro.T)
     # Draw world origin to the image with optimized params
-    #io, _ = cv2.projectPoints(to, rvec, -po, K, dist)
     io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, po, K, dist)
     io = io[0][0]
     iox = int(io[0])
@@ -209,48 +202,25 @@ for n in range(15):
     hvec = np.array([0, 0, 0, 1])
     # Camera extrinsics in global
     EGC = np.vstack((np.hstack((Ro.T, po)), hvec))
-    # Object extrinsics in global
-    EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
 
-    # Object pose in camera coordinate system
-    ECO = np.matmul(EGC, EGO)
-    RCO = ECO[:3, :3].astype(np.float32)
-    TCO = ECO[:3, 3].astype(np.float32)
-    rco_vec, _ = cv2.Rodrigues(RCO)
-    
-    # Draw object in image
-    oic, _ = cv2.projectPoints(np.zeros((3, 1)), rco_vec, TCO, K, dist)
-    oic = oic[0][0]
-    oicx = int(oic[0])
-    oicy = int(oic[1])
-    cv2.circle(img, (oicx, oicy), radius=10, color=(0, 255, 0), thickness=-1)
-    
-    # Draw object xyz-axes 
-    diag = np.eye(3)*0.15
-    ax_pts, _ = cv2.projectPoints(diag, rco_vec, TCO, K, dist)
-    ax_pts = ax_pts.astype(int)
-    x_pt = ax_pts[0][0]
-    y_pt = ax_pts[1][0]
-    z_pt = ax_pts[2][0]
-    cv2.line(img, (oicx, oicy), (x_pt[0], x_pt[1]),
-             (255, 0, 0), 4, 16)
-    cv2.line(img, (oicx, oicy), (y_pt[0], y_pt[1]),
-             (0, 255, 0), 4, 16)
-    cv2.line(img, (oicx, oicy), (z_pt[0], z_pt[1]),
-             (0, 0, 255), 4, 16)
+    for i in range(obj_count):
+        RWO = obj_Rs[i]
+        obj_t = obj_ts[i]
 
-    # Drawing bounding box around the object
-    ipoints, _ = cv2.projectPoints(opoints, rco_vec, TCO, K, dist)
-    ipoints = ipoints.astype(int).reshape(-1, 2)
-    for i, j in edges:
-        start = ipoints[i]
-        end = ipoints[j]
-        cv2.line(img, (start[0], start[1]), (end[0], end[1]),
-                 (0, 255, 0), 1, 16)
-    
+        # Object extrinsics in global
+        EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
+
+        # Object pose in camera coordinate system
+        ECO = np.matmul(EGC, EGO)
+        RCO = ECO[:3, :3].astype(np.float32)
+        TCO = ECO[:3, 3].astype(np.float32)
+        rco_vec, _ = cv2.Rodrigues(RCO)
+        
+        draw_pose(rco_vec, TCO, K, dist, img)
+
     plt.imshow(img)
     plt.show()
-
+    break
     '''
     # Save output images
     out_img_path = Root_dir + f'/TagVision/output/img{n+1}.png'
