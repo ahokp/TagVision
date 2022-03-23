@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from libs import LMA
 import pyrealsense2 as rs
 from scipy.optimize import least_squares
+import handleData
 
 def create_world_rotation_matrix(x, y, z):
     R_x = np.array([[1, 0, 0],
@@ -88,6 +89,8 @@ ex_obj_w_oris = [[0, 0, np.pi*5/4],
                  [0, 0, -np.pi/4],
                  [0, 0, np.pi/2]]
 
+ex_obj_ids = ['luvil', 'box', 'scale', 'shoe']
+
 # World position(xyz) of the tags
 ex_tag_ts = [np.array([[0.0805], [0.0805], [0]]),
              np.array([[0.13], [0.711], [0]]),
@@ -107,6 +110,7 @@ ex_tag_family = 'tag36h11'
 
 obj_ts = []
 obj_w_oris = []
+obj_ids = []
 tag_ts = []
 tag_w_oris = []
 tag_ids = []
@@ -129,6 +133,7 @@ while True:
 if(filename == 'example'):
     obj_ts = ex_obj_ts
     obj_w_oris = ex_obj_w_oris
+    obj_ids = ex_obj_ids
     tag_ts = ex_tag_ts
     tag_w_oris = ex_tag_w_oris
     tag_ids = ex_tag_ids
@@ -176,7 +181,7 @@ else:
         if line == "q":
             break
         vals = line.split(",")
-        if len(vals) != 6:
+        if len(vals) != 7:
             print("Incorrect number of parameter, try again.")
         else:
             try:
@@ -187,6 +192,7 @@ else:
                 continue
             obj_ts.append(loc)
             obj_w_oris.append(rot)
+            obj_ids.append(vals[6])
     
     if len(obj_ts) == 0:
         print("No valid object parameters inputted.")
@@ -227,10 +233,10 @@ rs.config.enable_device_from_file(config, bagfile)
 config.enable_stream(rs.stream.depth)
 config.enable_stream(rs.stream.color)
 
+data_dict = {k: [] for k in ['rgb', 'depth'] + obj_ids}
+
 # Start streaming from file
 pipeline.start(config)
-
-img_list = []
 
 print("Calculating object poses...")
 while True:
@@ -240,8 +246,9 @@ while True:
     color_frame = frames.get_color_frame()
 
     depth_data = np.asanyarray(depth_frame.get_data())
+    image = np.asanyarray(color_frame.get_data())
 
-    color_image = np.asanyarray(color_frame.get_data())
+    color_image = image.copy()
     img_gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
     img_size = (img_gray.shape[1], img_gray.shape[0])
 
@@ -347,6 +354,7 @@ while True:
     for i in range(obj_count):
         RWO = obj_Rs[i]
         obj_t = obj_ts[i]
+        obj_id = obj_ids[i]
 
         # Object extrinsics in global
         EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
@@ -358,16 +366,25 @@ while True:
         rco_vec, _ = cv2.Rodrigues(RCO)
         
         draw_pose(rco_vec, TCO, K, dist, color_image)
+        data_dict[obj_id].append(ECO)
 
     cv2.imshow("Color stream", color_image)
+
+    data_dict['rgb'].append(image.copy())
+    data_dict['depth'].append(depth_data.copy())
     
+    #img = color_image.copy()
+    #img_list.append(img)
     key = cv2.waitKey(0)
     if key == 27:
         cv2.destroyAllWindows()
         break
     
-    #img = color_image.copy()
-    #img_list.append(img)
+print("Saving data...")
+# Pickle RGB-D object pose data
+savefile = f'{Root_dir}/TagVision/savedData/{filename}.pkl'
+handleData.saveData(data_dict, savefile)
+print("Data saved")
 
 # Save frames as gif
 #imageio.mimsave(f'{Root_dir}/TagVision/outputGif/{filename}.gif', img_list, fps=20)
