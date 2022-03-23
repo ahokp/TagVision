@@ -229,7 +229,7 @@ detector = at.apriltag(tag_family)
 # Read .bag file saved by RealSense D435i and init stream pipeline
 pipeline = rs.pipeline()
 config = rs.config()
-rs.config.enable_device_from_file(config, bagfile)
+rs.config.enable_device_from_file(config, bagfile, repeat_playback=False)
 config.enable_stream(rs.stream.depth)
 config.enable_stream(rs.stream.color)
 
@@ -237,148 +237,153 @@ data_dict = {k: [] for k in ['rgb', 'depth'] + obj_ids}
 
 # Start streaming from file
 pipeline.start(config)
+try:
+    print("Calculating object poses...")
+    while True:
+        
+        frames = pipeline.wait_for_frames()
+        depth_frame = frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
 
-print("Calculating object poses...")
-while True:
-    
-    frames = pipeline.wait_for_frames()
-    depth_frame = frames.get_depth_frame()
-    color_frame = frames.get_color_frame()
+        depth_data = np.asanyarray(depth_frame.get_data())
+        image = np.asanyarray(color_frame.get_data())
 
-    depth_data = np.asanyarray(depth_frame.get_data())
-    image = np.asanyarray(color_frame.get_data())
+        color_image = image.copy()
+        img_gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+        img_size = (img_gray.shape[1], img_gray.shape[0])
 
-    color_image = image.copy()
-    img_gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
-    img_size = (img_gray.shape[1], img_gray.shape[0])
+        detections = detector.detect(img_gray)
+        tag_count = len(detections)
 
-    detections = detector.detect(img_gray)
-    tag_count = len(detections)
+        # No detections
+        if tag_count == 0:
+            cv2.imshow("Color stream", color_image)
+            continue
+        
+        ipts = []
+        opts = []
+        ids = []
 
-    # No detections
-    if tag_count == 0:
+        for i in range(tag_count):
+            tag = detections[i]
+            img_points = tag['lb-rb-rt-lt'].reshape(1, -1, 2).astype(np.float32)
+            
+            ipts.append(img_points)
+            opts.append(obj_points)
+            ids.append(int(tag['id']))
+        
+        if K.size == 0:
+            ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
+                                            opts, ipts,
+                                            img_size, None, None)   
+
+        tag_Rts = []
+        tag_tts = []
+        tag_og = []
+        cam_R = np.zeros((3, 3))
+        cam_t = np.zeros((3, 1))
+
+        for i in range(tag_count):
+            ret, rvec, tvec, _ = cv2.solvePnPRansac(opts[i][0], ipts[i][0], K, dist)
+            id = ids[i]
+            ind = tag_ids.index(id)
+            # Tag-to-world rotation
+            Rw = tag_Rs[ind]
+            # Tag origin coords in world coordinate system
+            tw = tag_ts[ind]
+
+            # Rotation and translation of the tag
+            Rt, _ = cv2.Rodrigues(np.float32(rvec))
+            t = tvec
+            # Rotation and translation of the camera in tag coord system
+            Rc = Rt.T
+            tc = -t
+
+            # Rotation to align with world coord system
+            R = np.matmul(Rw, Rc)
+            # Camera position in tag coord system
+            pos_t = np.matmul(R, tc)
+            # Camera position in world coord system
+            p = pos_t + tw
+            
+            # Global origin in camera coordinate system with tag params
+            og = -np.matmul(Rw, tw)
+
+            tag_og.append(og)
+            tag_Rts.append(Rt)
+            tag_tts.append(t)
+
+            cam_R += R
+            cam_t += p
+
+        Rcm = cam_R/tag_count
+        Rcm, _ = cv2.Rodrigues(Rcm)
+        tcm = cam_t/tag_count
+        # Initial camera extrinsic
+        init_extrinsic = np.concatenate((Rcm.T, tcm.T), axis=0).reshape(-1)
+
+        args = (tag_Rts, tag_tts, tag_og)
+        # Optimize camera extrinsics with Levenberg-Marquardt method
+        #err, extr, _ = LMA.LM(init_extrinsic, args, model_func, kmax=100)
+
+        # Optimize camera ectrinsics with Trust Region Reflective algorithm
+        res_lsq = least_squares(model_func, init_extrinsic, args=args,
+                                loss='soft_l1', f_scale=0.1, method='trf',
+                                max_nfev=1)
+        extr = res_lsq.x
+
+        rvo = np.array([extr[0], extr[1], extr[2]]).astype(np.float32)
+        Ro, _ = cv2.Rodrigues(rvo)
+        to = np.array([[extr[3], extr[4], extr[5]]]).T.astype(np.float32)
+        
+        # World origin in camera coord system
+        po = np.matmul(Ro.T, -to)
+        
+        rvec, _ = cv2.Rodrigues(Ro.T)
+        # Draw world origin to the image with optimized params
+        io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, po, K, dist)
+        io = io[0][0]
+        iox = int(io[0])
+        ioy = int(io[1])
+        cv2.circle(color_image, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
+
+        hvec = np.array([0, 0, 0, 1])
+        # Camera extrinsics in global
+        EGC = np.vstack((np.hstack((Ro.T, po)), hvec))
+
+        for i in range(obj_count):
+            RWO = obj_Rs[i]
+            obj_t = obj_ts[i]
+            obj_id = obj_ids[i]
+
+            # Object extrinsics in global
+            EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
+
+            # Object pose in camera coordinate system
+            ECO = np.matmul(EGC, EGO)
+            RCO = ECO[:3, :3].astype(np.float32)
+            TCO = ECO[:3, 3].astype(np.float32)
+            rco_vec, _ = cv2.Rodrigues(RCO)
+            
+            draw_pose(rco_vec, TCO, K, dist, color_image)
+            data_dict[obj_id].append(ECO)
+
         cv2.imshow("Color stream", color_image)
-        continue
-    
-    ipts = []
-    opts = []
-    ids = []
 
-    for i in range(tag_count):
-        tag = detections[i]
-        img_points = tag['lb-rb-rt-lt'].reshape(1, -1, 2).astype(np.float32)
+        data_dict['rgb'].append(image.copy())
+        data_dict['depth'].append(depth_data.copy())
         
-        ipts.append(img_points)
-        opts.append(obj_points)
-        ids.append(int(tag['id']))
-    
-    if K.size == 0:
-        ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
-                                        opts, ipts,
-                                        img_size, None, None)   
+        #img = color_image.copy()
+        #img_list.append(img)
+        key = cv2.waitKey(1)
+        if key == 27:
+            break
 
-    tag_Rts = []
-    tag_tts = []
-    tag_og = []
-    cam_R = np.zeros((3, 3))
-    cam_t = np.zeros((3, 1))
+# No more frames to run.
+except RuntimeError:
+    pipeline.stop()
 
-    for i in range(tag_count):
-        ret, rvec, tvec, _ = cv2.solvePnPRansac(opts[i][0], ipts[i][0], K, dist)
-        id = ids[i]
-        ind = tag_ids.index(id)
-        # Tag-to-world rotation
-        Rw = tag_Rs[ind]
-        # Tag origin coords in world coordinate system
-        tw = tag_ts[ind]
-
-        # Rotation and translation of the tag
-        Rt, _ = cv2.Rodrigues(np.float32(rvec))
-        t = tvec
-        # Rotation and translation of the camera in tag coord system
-        Rc = Rt.T
-        tc = -t
-
-        # Rotation to align with world coord system
-        R = np.matmul(Rw, Rc)
-        # Camera position in tag coord system
-        pos_t = np.matmul(R, tc)
-        # Camera position in world coord system
-        p = pos_t + tw
-        
-        # Global origin in camera coordinate system with tag params
-        og = -np.matmul(Rw, tw)
-
-        tag_og.append(og)
-        tag_Rts.append(Rt)
-        tag_tts.append(t)
-
-        cam_R += R
-        cam_t += p
-
-    Rcm = cam_R/tag_count
-    Rcm, _ = cv2.Rodrigues(Rcm)
-    tcm = cam_t/tag_count
-    # Initial camera extrinsic
-    init_extrinsic = np.concatenate((Rcm.T, tcm.T), axis=0).reshape(-1)
-
-    args = (tag_Rts, tag_tts, tag_og)
-    # Optimize camera extrinsics with Levenberg-Marquardt method
-    #err, extr, _ = LMA.LM(init_extrinsic, args, model_func, kmax=100)
-
-    # Optimize camera ectrinsics with Trust Region Reflective algorithm
-    res_lsq = least_squares(model_func, init_extrinsic, args=args,
-                            loss='soft_l1', f_scale=0.1, method='trf',
-                            max_nfev=1)
-    extr = res_lsq.x
-
-    rvo = np.array([extr[0], extr[1], extr[2]]).astype(np.float32)
-    Ro, _ = cv2.Rodrigues(rvo)
-    to = np.array([[extr[3], extr[4], extr[5]]]).T.astype(np.float32)
-    
-    # World origin in camera coord system
-    po = np.matmul(Ro.T, -to)
-    
-    rvec, _ = cv2.Rodrigues(Ro.T)
-    # Draw world origin to the image with optimized params
-    io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, po, K, dist)
-    io = io[0][0]
-    iox = int(io[0])
-    ioy = int(io[1])
-    cv2.circle(color_image, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
-
-    hvec = np.array([0, 0, 0, 1])
-    # Camera extrinsics in global
-    EGC = np.vstack((np.hstack((Ro.T, po)), hvec))
-
-    for i in range(obj_count):
-        RWO = obj_Rs[i]
-        obj_t = obj_ts[i]
-        obj_id = obj_ids[i]
-
-        # Object extrinsics in global
-        EGO = np.vstack((np.hstack((RWO, obj_t)), hvec))
-
-        # Object pose in camera coordinate system
-        ECO = np.matmul(EGC, EGO)
-        RCO = ECO[:3, :3].astype(np.float32)
-        TCO = ECO[:3, 3].astype(np.float32)
-        rco_vec, _ = cv2.Rodrigues(RCO)
-        
-        draw_pose(rco_vec, TCO, K, dist, color_image)
-        data_dict[obj_id].append(ECO)
-
-    cv2.imshow("Color stream", color_image)
-
-    data_dict['rgb'].append(image.copy())
-    data_dict['depth'].append(depth_data.copy())
-    
-    #img = color_image.copy()
-    #img_list.append(img)
-    key = cv2.waitKey(0)
-    if key == 27:
-        cv2.destroyAllWindows()
-        break
+cv2.destroyAllWindows()    
     
 print("Saving data...")
 # Pickle RGB-D object pose data
