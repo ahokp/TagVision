@@ -75,16 +75,124 @@ def draw_pose(rvec, tvec, K, dist, img):
         cv2.line(img, (oicx, oicy), (z_pt[0], z_pt[1]),
                 (0, 0, 255), 4, 16)
 
+############## EXAMPLE PARAMETERS ################
+
 # World position of the objects
-obj_ts = [np.array([[0.11], [0.342], [0]]),
-          np.array([[0.455], [0.553], [0]]),
-          np.array([[0.32], [1.001], [0]]),
-          np.array([[0.84], [0.767], [0]])]
+ex_obj_ts = [np.array([[0.11], [0.342], [0]]),
+             np.array([[0.455], [0.553], [0]]),
+             np.array([[0.32], [1.001], [0]]),
+             np.array([[0.84], [0.767], [0]])]
 # Orientation of the objects with respect to the world coord system
-obj_w_oris = [[0, 0, np.pi*5/4],
-              [0, np.pi/2, 0],
-              [0, 0, -np.pi/4],
-              [0, 0, np.pi/2]]
+ex_obj_w_oris = [[0, 0, np.pi*5/4],
+                 [0, np.pi/2, 0],
+                 [0, 0, -np.pi/4],
+                 [0, 0, np.pi/2]]
+
+# World position(xyz) of the tags
+ex_tag_ts = [np.array([[0.0805], [0.0805], [0]]),
+             np.array([[0.13], [0.711], [0]]),
+             np.array([[0.87], [1.068], [0]]),
+             np.array([[0.611], [0.273], [0]])]
+
+# Orientation of the tags in radian
+ex_tag_w_oris = [[0, 0, 0],
+                [0, 0, -np.pi/4],
+                [0, 0, 0],
+                [0, 0, np.pi/4]]
+
+ex_tag_ids = [0, 1, 2, 3]
+ex_tag_size = 0.161
+ex_tag_family = 'tag36h11'
+##################################################
+
+obj_ts = []
+obj_w_oris = []
+tag_ts = []
+tag_w_oris = []
+tag_ids = []
+tag_size = None
+tag_family = None
+
+Root_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
+
+print("Please enter the name of your .bag file.\nEnter 'example' to run the example file.")
+
+while True:
+    filename = input()
+    bagfile = f'{Root_dir}/TagVision/inputBag/{filename}.bag'
+    if os.path.exists(bagfile):
+        break
+    else:
+        print(f"No file '{filename}.bag' found, try again")
+        print("Do not include the '.bag' part in your input.")
+
+if(filename == 'example'):
+    obj_ts = ex_obj_ts
+    obj_w_oris = ex_obj_w_oris
+    tag_ts = ex_tag_ts
+    tag_w_oris = ex_tag_w_oris
+    tag_ids = ex_tag_ids
+    tag_size = ex_tag_size
+    tag_family = ex_tag_family
+else:
+    # Get user inputted values
+    tag_family = input("Enter tag family: ")
+    tag_size = int(input("Enter tag size: "))
+
+    print("Enter TAG world locations in meters, rotations in degrees and tag id seperated by comma.")
+    print("In the following order: x,y,z,x_rotation,y_rotation,z_rotation,id")
+    print("Enter 'q' if you wish to continue.")
+
+    while True:
+        line = input()
+        if line == "q":
+            break
+        vals = line.split(",")
+        if len(vals) != 7:
+            print("Incorrect number of parameter, try again.")
+        else:
+            try:
+                loc = np.array([vals[0], vals[1], vals[2]]).astype(np.float32)
+                rot = np.array([vals[3], vals[4], vals[5]]).astype(np.float32)*(2*np.pi/360)
+                id = int(vals[6])
+            except TypeError:
+                print("Wrong input type, inputs should be integers or float values")
+                continue
+            tag_ts.append(loc)
+            tag_w_oris.append(rot)
+            tag_ids.append(id)
+    
+    if len(tag_ts) == 0:
+        print("No valid tag parameters inputted.")
+        print("Exiting program...")
+        exit()
+
+    print("Enter OBJECT world locations in meters and rotations in degrees seperated by comma.")
+    print("In the following order: x,y,z,x_rotation,y_rotation,z_rotation")
+    print("Enter 'q' if you wish to continue.")
+
+    while True:
+        line = input()
+        if line == "q":
+            break
+        vals = line.split(",")
+        if len(vals) != 6:
+            print("Incorrect number of parameter, try again.")
+        else:
+            try:
+                loc = np.array([vals[0], vals[1], vals[2]]).astype(np.float32)
+                rot = np.array([vals[3], vals[4], vals[5]]).astype(np.float32)*(2*np.pi/360)
+            except TypeError:
+                print("Wrong input type, inputs should be integers or float values")
+                continue
+            obj_ts.append(loc)
+            obj_w_oris.append(rot)
+    
+    if len(obj_ts) == 0:
+        print("No valid object parameters inputted.")
+        print("Exiting program...")
+        exit()
+
 # Create object-to-world rotations
 obj_Rs = []
 obj_count = len(obj_ts)
@@ -92,29 +200,12 @@ for i in range(obj_count):
     rot = obj_w_oris[i]
     obj_Rs.append(create_world_rotation_matrix(rot[0], rot[1], rot[2]))
 
-
-tag_size = 0.161
-# World position(xyz) of the tags
-tag_ts = [np.array([[0.0805], [0.0805], [0]]),
-          np.array([[0.13], [0.711], [0]]),
-          np.array([[0.87], [1.068], [0]]),
-          np.array([[0.611], [0.273], [0]])]
-
-# Orientation of the tags in radian
-tag_w_ori = [[0, 0, 0],
-             [0, 0, -np.pi/4],
-             [0, 0, 0],
-             [0, 0, np.pi/4]]
-
 tag_Rs = []
-total_tags = len(tag_w_ori)
+total_tags = len(tag_w_oris)
 for i in range(total_tags):
     # Create tag-to-world rotations
-    rot = tag_w_ori[i]
+    rot = tag_w_oris[i]
     tag_Rs.append(create_world_rotation_matrix(rot[0], rot[1], rot[2]))
-
-# AprilTag detector
-detector = at.apriltag('tag36h11')
 
 # Camera params
 K = np.array([])
@@ -126,33 +217,30 @@ obj_points = np.array([-1, -1, 0,
                         1, 1, 0,
                         -1, 1, 0]).astype(np.float32).reshape(1, -1, 3)*tag_size/2
 
-Root_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
+# AprilTag detector
+detector = at.apriltag(tag_family)
 
-
-bagfile = f'{Root_dir}/TagVision/inputBag/scene.bag'
-
-# Read .bag file saved by RealSense D435i
+# Read .bag file saved by RealSense D435i and init stream pipeline
 pipeline = rs.pipeline()
 config = rs.config()
 rs.config.enable_device_from_file(config, bagfile)
 config.enable_stream(rs.stream.depth)
 config.enable_stream(rs.stream.color)
-pipeline.start(config)
 
-colorizer = rs.colorizer()
+# Start streaming from file
+pipeline.start(config)
 
 img_list = []
 
+print("Calculating object poses...")
 while True:
     
     frames = pipeline.wait_for_frames()
     depth_frame = frames.get_depth_frame()
     color_frame = frames.get_color_frame()
-    #print(depth_frame.get_distance(100, 100))
 
-    #depth_color_frame = colorizer.colorize(depth_frame)
-    #depth_color_image = np.asanyarray(depth_color_frame.get_data())
-    
+    depth_data = np.asanyarray(depth_frame.get_data())
+
     color_image = np.asanyarray(color_frame.get_data())
     img_gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
     img_size = (img_gray.shape[1], img_gray.shape[0])
@@ -191,10 +279,11 @@ while True:
     for i in range(tag_count):
         ret, rvec, tvec, _ = cv2.solvePnPRansac(opts[i][0], ipts[i][0], K, dist)
         id = ids[i]
+        ind = tag_ids.index(id)
         # Tag-to-world rotation
-        Rw = tag_Rs[id]
+        Rw = tag_Rs[ind]
         # Tag origin coords in world coordinate system
-        tw = tag_ts[id]
+        tw = tag_ts[ind]
 
         # Rotation and translation of the tag
         Rt, _ = cv2.Rodrigues(np.float32(rvec))
@@ -272,7 +361,7 @@ while True:
 
     cv2.imshow("Color stream", color_image)
     
-    key = cv2.waitKey(1)
+    key = cv2.waitKey(0)
     if key == 27:
         cv2.destroyAllWindows()
         break
@@ -281,6 +370,4 @@ while True:
     #img_list.append(img)
 
 # Save frames as gif
-#imageio.mimsave(f'{Root_dir}/TagVision/outputGif/scene.gif', img_list, fps=20)
-
-exit()
+#imageio.mimsave(f'{Root_dir}/TagVision/outputGif/{filename}.gif', img_list, fps=20)
