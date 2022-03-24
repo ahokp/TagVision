@@ -140,14 +140,14 @@ if(filename == 'example'):
 else:
     # Get user inputted values
     tag_family = input("Enter tag family: ")
-    tag_size = int(input("Enter tag size: "))
+    tag_size = float(input("Enter tag size: "))
 
     print("Enter TAG world locations in meters, rotations in degrees and tag id seperated by comma.")
     print("In the following order: x,y,z,x_rotation,y_rotation,z_rotation,id")
     print("Enter 'q' if you wish to continue.")
 
     while True:
-        line = input()
+        line = input("Tag parameters: ")
         if line == "q":
             break
         vals = line.split(",")
@@ -155,7 +155,7 @@ else:
             print("Incorrect number of parameter, try again.")
         else:
             try:
-                loc = np.array([vals[0], vals[1], vals[2]]).astype(np.float32)
+                loc = np.array([[vals[0]], [vals[1]], [vals[2]]]).astype(np.float32)
                 rot = np.array([vals[3], vals[4], vals[5]]).astype(np.float32)*(2*np.pi/360)
                 id = int(vals[6])
             except TypeError:
@@ -170,12 +170,12 @@ else:
         print("Exiting program...")
         exit()
 
-    print("Enter OBJECT world locations in meters and rotations in degrees seperated by comma.")
-    print("In the following order: x,y,z,x_rotation,y_rotation,z_rotation")
+    print("Enter OBJECT world locations in meters, rotations in degrees and object id seperated by comma.")
+    print("In the following order: x,y,z,x_rotation,y_rotation,z_rotation,id")
     print("Enter 'q' if you wish to continue.")
 
     while True:
-        line = input()
+        line = input("Object parameters: ")
         if line == "q":
             break
         vals = line.split(",")
@@ -183,7 +183,7 @@ else:
             print("Incorrect number of parameter, try again.")
         else:
             try:
-                loc = np.array([vals[0], vals[1], vals[2]]).astype(np.float32)
+                loc = np.array([[vals[0]], [vals[1]], [vals[2]]]).astype(np.float32)
                 rot = np.array([vals[3], vals[4], vals[5]]).astype(np.float32)*(2*np.pi/360)
             except TypeError:
                 print("Wrong input type, inputs should be integers or float values")
