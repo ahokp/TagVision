@@ -14,7 +14,7 @@ data_dict = handleData.readData(savefile)
 rgb = data_dict['rgb']
 depth = data_dict['depth']
 
-example_obj_ids = ['luvil', 'box', 'scale', 'shoe']
+example_obj_ids = ['box', 'shoe', 'calculator']
 
 frame_count = len(rgb)
 # Go through each frame

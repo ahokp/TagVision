@@ -2,11 +2,11 @@ import apriltag as at
 import cv2
 import numpy as np
 import os
-from matplotlib import pyplot as plt
 from libs import LMA
 import pyrealsense2 as rs
 from scipy.optimize import least_squares
 import handleData
+import imageio
 
 def create_world_rotation_matrix(x, y, z):
     R_x = np.array([[1, 0, 0],
@@ -79,28 +79,26 @@ def draw_pose(rvec, tvec, K, dist, img):
 ############## EXAMPLE PARAMETERS ################
 
 # World position of the objects
-ex_obj_ts = [np.array([[0.11], [0.342], [0]]),
-             np.array([[0.455], [0.553], [0]]),
-             np.array([[0.32], [1.001], [0]]),
-             np.array([[0.84], [0.767], [0]])]
+ex_obj_ts = [np.array([[0.09], [0.533], [0]]),
+             np.array([[0.33], [0.27], [0]]),
+             np.array([[0.654], [0.4655], [0]])]
 # Orientation of the objects with respect to the world coord system
-ex_obj_w_oris = [[0, 0, np.pi*5/4],
-                 [0, np.pi/2, 0],
+ex_obj_w_oris = [[0, 0, 0],
                  [0, 0, -np.pi/4],
-                 [0, 0, np.pi/2]]
+                 [0, 0, np.pi/4]]
 
-ex_obj_ids = ['luvil', 'box', 'scale', 'shoe']
+ex_obj_ids = ['box', 'shoe', 'calculator']
 
 # World position(xyz) of the tags
 ex_tag_ts = [np.array([[0.0805], [0.0805], [0]]),
-             np.array([[0.13], [0.711], [0]]),
-             np.array([[0.87], [1.068], [0]]),
-             np.array([[0.611], [0.273], [0]])]
+             np.array([[0.632], [0.0905], [0]]),
+             np.array([[0.689], [0.7885], [0]]),
+             np.array([[0.1645], [0.695], [0]])]
 
 # Orientation of the tags in radian
 ex_tag_w_oris = [[0, 0, 0],
                 [0, 0, -np.pi/4],
-                [0, 0, 0],
+                [0, 0, np.pi/2],
                 [0, 0, np.pi/4]]
 
 ex_tag_ids = [0, 1, 2, 3]
@@ -234,6 +232,7 @@ config.enable_stream(rs.stream.depth)
 config.enable_stream(rs.stream.color)
 
 data_dict = {k: [] for k in ['rgb', 'depth'] + obj_ids}
+#img_list=[]
 
 # Start streaming from file
 pipeline.start(config)
@@ -338,14 +337,6 @@ try:
         
         # World origin in camera coord system
         po = np.matmul(Ro.T, -to)
-        
-        rvec, _ = cv2.Rodrigues(Ro.T)
-        # Draw world origin to the image with optimized params
-        io, _ = cv2.projectPoints(np.zeros((3,1)), rvec, po, K, dist)
-        io = io[0][0]
-        iox = int(io[0])
-        ioy = int(io[1])
-        cv2.circle(color_image, (iox, ioy), radius=10, color=(255, 0, 0), thickness=-1)
 
         hvec = np.array([0, 0, 0, 1])
         # Camera extrinsics in global
@@ -373,23 +364,25 @@ try:
         data_dict['rgb'].append(image.copy())
         data_dict['depth'].append(depth_data.copy())
         
-        #img = color_image.copy()
-        #img_list.append(img)
         key = cv2.waitKey(1)
         if key == 27:
             break
+        
+        #img = color_image.copy()
+        #img_list.append(img)
 
 # No more frames to run.
 except RuntimeError:
     pipeline.stop()
 
 cv2.destroyAllWindows()    
-    
+
 print("Saving data...")
 # Pickle RGB-D object pose data
 savefile = f'{Root_dir}/TagVision/savedData/{filename}.pkl'
 handleData.saveData(data_dict, savefile)
-print("Data saved")
 
 # Save frames as gif
 #imageio.mimsave(f'{Root_dir}/TagVision/outputGif/{filename}.gif', img_list, fps=20)
+
+print("Data saved")
