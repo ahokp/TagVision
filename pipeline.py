@@ -1,3 +1,7 @@
+# Author: Paul Ahokas
+# This file implements a pipeline for collecting AprilTag aided
+# 6D object pose RGB-D data with Intel D435i depth camera.
+
 import apriltag as at
 import cv2
 import numpy as np
@@ -120,7 +124,7 @@ Root_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
 print("Please enter the name of your .bag file.\nEnter 'example' to run the example file.")
 
 while True:
-    filename = input()
+    filename = input("File: ")
     bagfile = f'{Root_dir}/TagVision/inputBag/{filename}.bag'
     if os.path.exists(bagfile):
         break
@@ -304,7 +308,7 @@ try:
             pos_t = np.matmul(R, tc)
             # Camera position in world coord system
             p = pos_t + tw
-            
+
             # Global origin in camera coordinate system with tag params
             og = -np.matmul(Rw, tw)
 

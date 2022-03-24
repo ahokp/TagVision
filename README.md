@@ -6,7 +6,7 @@ This program has been tested using Python 3.8.10 on Ubuntu 20.4.
 Detections have been tested on tag family Tag36h11.
 
 Usage:
-Run python file "datag.py".
+Run python file "pipeline.py".
 Input "example" to run the program with the example file and parameters.
 
 For your own data:
